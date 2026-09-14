@@ -1,0 +1,6 @@
+{
+  "name": "Vendor Contract Generator",
+  "description": "Automate batch vendor contract generation from Excel data and Word templates with Jinja2 placeholders.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
