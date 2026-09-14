@@ -4,7 +4,9 @@ Automates the generation of customized vendor contracts from Excel data and a Wo
 """
 
 import io
+import os
 import re
+import tempfile
 import time
 import zipfile
 from datetime import datetime
@@ -13,6 +15,13 @@ from typing import Dict, Any, List, Optional, Tuple
 import pandas as pd
 import streamlit as st
 from docxtpl import DocxTemplate
+
+try:
+    from docx2pdf import convert as convert_to_pdf
+    DOCX2PDF_AVAILABLE = True
+except ImportError:
+    DOCX2PDF_AVAILABLE = False
+
 
 # -----------------------------------------------------------------------------
 # Page Configuration & Theming
@@ -360,6 +369,14 @@ def main():
             type=["docx"],
             help="Upload the Word template with Jinja2 placeholders (e.g. {{ vendor_name }}).",
         )
+        
+        st.subheader("⚙️ Settings")
+        output_format = st.selectbox(
+            "Output Format", 
+            options=["Word (.docx)", "PDF (.pdf)"],
+            help="Choose the format of the generated contracts. PDF generation requires MS Word to be installed." if DOCX2PDF_AVAILABLE else "PDF generation requires the docx2pdf package and MS Word.",
+            disabled=not DOCX2PDF_AVAILABLE
+        )
 
         st.divider()
 
@@ -569,7 +586,6 @@ def main():
             
             # Clean filename
             safe_name = re.sub(r"[^\w\-_\. ]", "_", f"{v_id}_{v_name}").strip()
-            filename = f"Contract_{safe_name}.docx"
 
             status_text.text(f"Rendering contract ({i+1}/{total_selected}): {v_name}...")
 
@@ -583,10 +599,27 @@ def main():
                 # Render Jinja2 tags
                 doc.render(context)
                 
-                # Save to in-memory bytes
-                out_stream = io.BytesIO()
-                doc.save(out_stream)
-                generated_files.append((filename, out_stream.getvalue()))
+                if output_format == "PDF (.pdf)":
+                    filename = f"Contract_{safe_name}.pdf"
+                    
+                    # We must write to temp files for docx2pdf to work
+                    with tempfile.TemporaryDirectory() as tmpdir:
+                        temp_docx = os.path.join(tmpdir, "temp.docx")
+                        temp_pdf = os.path.join(tmpdir, "temp.pdf")
+                        
+                        doc.save(temp_docx)
+                        convert_to_pdf(temp_docx, temp_pdf)
+                        
+                        with open(temp_pdf, "rb") as f:
+                            pdf_bytes = f.read()
+                            
+                    generated_files.append((filename, pdf_bytes))
+                else:
+                    filename = f"Contract_{safe_name}.docx"
+                    # Save to in-memory bytes
+                    out_stream = io.BytesIO()
+                    doc.save(out_stream)
+                    generated_files.append((filename, out_stream.getvalue()))
 
             except Exception as render_err:
                 errors.append(f"Failed to generate for row {idx} ({v_name}): {str(render_err)}")
@@ -617,11 +650,12 @@ def main():
         # Single contract download
         if len(generated_files) == 1:
             fname, fbytes = generated_files[0]
+            mime_type = "application/pdf" if fname.endswith(".pdf") else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             st.download_button(
                 label=f"📄 Download {fname}",
                 data=fbytes,
                 file_name=fname,
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                mime=mime_type,
                 type="primary",
             )
         # Multiple contracts download -> Bundle into ZIP in memory
