@@ -1,6 +1,7 @@
 """
 Vendor Contract Generator - Streamlit Web Application
 Automates the generation of customized vendor contracts from Excel data and a Word (.docx) template.
+Includes support for Word (.docx), PDF (.pdf), both formats, and signature image embedding.
 """
 
 import io
@@ -14,7 +15,8 @@ from typing import Dict, Any, List, Optional, Tuple
 
 import pandas as pd
 import streamlit as st
-from docxtpl import DocxTemplate
+from docxtpl import DocxTemplate, InlineImage
+from docx.shared import Inches
 
 from pathlib import Path
 import subprocess
@@ -83,13 +85,11 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    /* Main container padding */
     .main .block-container {
         padding-top: 2rem;
         padding-bottom: 3rem;
         max-width: 1200px;
     }
-    /* Metric / Stat badges */
     .stat-badge {
         display: inline-flex;
         align-items: center;
@@ -112,7 +112,6 @@ st.markdown(
         margin: 0.15rem;
         border: 1px solid #e2e8f0;
     }
-    /* Instructions callout */
     .guide-box {
         background-color: #f8fafc;
         border: 1px solid #e2e8f0;
@@ -147,16 +146,13 @@ def sanitize_value(val: Any) -> Any:
 def sanitize_row_context(row: pd.Series) -> Dict[str, Any]:
     """
     Converts a DataFrame row into a clean dictionary context for Jinja2 / docxtpl.
-    Both original column names and slugified versions (lower, snake_case)
-    are provided so templates can reference {{ vendor_name }} or {{ Vendor Name }}.
+    Both original column names and slugified versions (lower, snake_case) are provided.
     """
     context: Dict[str, Any] = {}
     for col_name, value in row.items():
         clean_val = sanitize_value(value)
-        # Original column key
         context[str(col_name)] = clean_val
         
-        # Normalized key: lowercase and underscores instead of spaces/special chars
         normalized_key = re.sub(r"[^\w]+", "_", str(col_name).strip().lower()).strip("_")
         if normalized_key and normalized_key not in context:
             context[normalized_key] = clean_val
@@ -165,16 +161,13 @@ def sanitize_row_context(row: pd.Series) -> Dict[str, Any]:
 
 
 def auto_detect_columns(columns: List[str]) -> Tuple[Optional[str], Optional[str]]:
-    """
-    Heuristically auto-detects vendor ID and vendor Name columns.
-    """
+    """Heuristically auto-detects vendor ID and vendor Name columns."""
     id_candidates = ["vendor_id", "vendor id", "id", "supplier_id", "vendor_code", "code", "account_id"]
     name_candidates = ["vendor_name", "vendor name", "company_name", "company", "name", "supplier_name", "vendor", "supplier"]
 
     detected_id = None
     detected_name = None
 
-    # Detect ID column
     for col in columns:
         cleaned = col.strip().lower()
         if cleaned in id_candidates or any(cand in cleaned for cand in ["vendor_id", "vendor id", "supplier_id"]):
@@ -186,7 +179,6 @@ def auto_detect_columns(columns: List[str]) -> Tuple[Optional[str], Optional[str
                 detected_id = col
                 break
 
-    # Detect Name column
     for col in columns:
         cleaned = col.strip().lower()
         if cleaned in name_candidates or any(cand in cleaned for cand in ["vendor_name", "company"]):
@@ -198,7 +190,6 @@ def auto_detect_columns(columns: List[str]) -> Tuple[Optional[str], Optional[str
                 detected_name = col
                 break
 
-    # Defaults if still not found
     if not detected_id and len(columns) > 0:
         detected_id = columns[0]
     if not detected_name and len(columns) > 1:
@@ -238,9 +229,9 @@ def generate_sample_excel() -> bytes:
         "notes": [
             "Includes priority 24/7 SLA dispatch.",
             "Cloud infrastructure SLA 99.95% tier.",
-            None,  # Tests NaN handling
+            None,
             "Certified ISO-9001 precision supplier.",
-            None,  # Tests NaN handling
+            None,
         ],
     }
     df = pd.DataFrame(sample_data)
@@ -251,24 +242,19 @@ def generate_sample_excel() -> bytes:
 
 
 def generate_sample_docx_template() -> bytes:
-    """
-    Creates a sample Word document (.docx) containing Jinja2 placeholders.
-    Uses docxtpl-friendly tags.
-    """
+    """Creates a sample Word document (.docx) containing Jinja2 placeholders and signature tag."""
     from docx import Document
     from docx.shared import Pt, Inches, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
 
     doc = Document()
 
-    # Set margins
     for section in doc.sections:
         section.top_margin = Inches(1)
         section.bottom_margin = Inches(1)
         section.left_margin = Inches(1)
         section.right_margin = Inches(1)
 
-    # Title
     title = doc.add_paragraph()
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run_title = title.add_run("MASTER VENDOR SERVICES AGREEMENT")
@@ -277,7 +263,6 @@ def generate_sample_docx_template() -> bytes:
     run_title.font.bold = True
     run_title.font.color.rgb = RGBColor(30, 41, 59)
 
-    # Subtitle
     sub = doc.add_paragraph()
     sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run_sub = sub.add_run("Contract Reference: {{ vendor_id }}")
@@ -286,12 +271,11 @@ def generate_sample_docx_template() -> bytes:
     run_sub.font.italic = True
     run_sub.font.color.rgb = RGBColor(100, 116, 139)
 
-    doc.add_paragraph()  # Blank space
+    doc.add_paragraph()
 
-    # Preamble
     p1 = doc.add_paragraph()
     p1.paragraph_format.line_spacing = 1.25
-    r = p1.add_run("This Master Vendor Agreement (\"Agreement\") is entered into as of ")
+    r = p1.add_run('This Master Vendor Agreement ("Agreement") is entered into as of ')
     r.font.name = "Arial"
     r.font.size = Pt(10.5)
 
@@ -300,7 +284,7 @@ def generate_sample_docx_template() -> bytes:
     r_date.font.size = Pt(10.5)
     r_date.font.bold = True
 
-    r2 = p1.add_run(", by and between Enterprise Corporation (\"Client\") and ")
+    r2 = p1.add_run(', by and between Enterprise Corporation ("Client") and ')
     r2.font.name = "Arial"
     r2.font.size = Pt(10.5)
 
@@ -309,11 +293,10 @@ def generate_sample_docx_template() -> bytes:
     r_vname.font.size = Pt(10.5)
     r_vname.font.bold = True
 
-    r3 = p1.add_run(", a corporation organized under the laws of {{ state_of_incorporation }} (\"Vendor\").")
+    r3 = p1.add_run(', a corporation organized under the laws of {{ state_of_incorporation }} ("Vendor").')
     r3.font.name = "Arial"
     r3.font.size = Pt(10.5)
 
-    # Section 1: Summary Table
     h1 = doc.add_heading(level=1)
     h1_run = h1.add_run("1. Vendor Information & Engagement Summary")
     h1_run.font.name = "Arial"
@@ -344,7 +327,6 @@ def generate_sample_docx_template() -> bytes:
         c1.font.name = "Arial"
         c1.font.size = Pt(9.5)
 
-    # Section 2: Special Terms / Notes
     doc.add_paragraph()
     h2 = doc.add_heading(level=1)
     h2_run = h2.add_run("2. Scope Notes & Special Conditions")
@@ -361,7 +343,6 @@ def generate_sample_docx_template() -> bytes:
     r_notes.font.name = "Arial"
     r_notes.font.size = Pt(10.5)
 
-    # Section 3: Signatures
     doc.add_paragraph()
     h3 = doc.add_heading(level=1)
     h3_run = h3.add_run("3. Signatures")
@@ -369,14 +350,18 @@ def generate_sample_docx_template() -> bytes:
     h3_run.font.size = Pt(13)
     h3_run.font.bold = True
 
-    sig_table = doc.add_table(rows=3, cols=2)
+    sig_table = doc.add_table(rows=2, cols=2)
     sig_table.style = "Table Grid"
 
     sig_table.rows[0].cells[0].paragraphs[0].add_run("CLIENT:\nEnterprise Corporation").font.bold = True
     sig_table.rows[0].cells[1].paragraphs[0].add_run("VENDOR:\n{{ vendor_name }}").font.bold = True
 
-    sig_table.rows[1].cells[0].paragraphs[0].add_run("\nSignature: __________________________\nName: Authorized Officer\nDate: {{ effective_date }}")
-    sig_table.rows[1].cells[1].paragraphs[0].add_run("\nSignature: __________________________\nName: {{ contact_person }}\nDate: __________________________")
+    sig_table.rows[1].cells[0].paragraphs[0].add_run(
+        "\nAuthorized Signature:\n{{ signature_img }}\nName: Authorized Officer\nDate: {{ effective_date }}"
+    )
+    sig_table.rows[1].cells[1].paragraphs[0].add_run(
+        "\nVendor Signature:\n__________________________\nName: {{ contact_person }}\nDate: __________________________"
+    )
 
     buf = io.BytesIO()
     doc.save(buf)
@@ -389,10 +374,9 @@ def generate_sample_docx_template() -> bytes:
 def main():
     st.title("📄 Vendor Contract Generator")
     st.markdown(
-        "Automate the batch generation of personalized vendor contracts from an Excel sheet and a Word template with Jinja2 placeholders."
+        "Automate the batch generation of personalized vendor contracts with custom corporate signatures."
     )
 
-    # Initialize Session State
     if "vendor_multiselect" not in st.session_state:
         st.session_state.vendor_multiselect = []
 
@@ -413,17 +397,33 @@ def main():
             type=["docx"],
             help="Upload the Word template with Jinja2 placeholders (e.g. {{ vendor_name }}).",
         )
+
+        st.divider()
+        st.header("✍️ 2. Signature & Output Settings")
+
+        signature_file = st.file_uploader(
+            "Authorized Signature Image (PNG, JPG)",
+            type=["png", "jpg", "jpeg"],
+            help="Upload an image of your signature to embed into the contract.",
+        )
+
+        sig_width_inches = st.slider(
+            "Signature Image Width (Inches)",
+            min_value=1.0,
+            max_value=3.5,
+            value=1.75,
+            step=0.25,
+            help="Adjusts the display size of the signature in the document.",
+        )
         
-        st.subheader("⚙️ Settings")
         output_format = st.selectbox(
             "Output Format", 
             options=["Word (.docx)", "PDF (.pdf)", "Both (.docx & .pdf)"],
-            help="Choose the format of the generated contracts. PDF generation requires MS Word to be installed." if DOCX2PDF_AVAILABLE else "PDF generation requires the docx2pdf package and MS Word.",
+            help="Choose the format of the generated contracts.",
         )
 
         st.divider()
 
-        # Sample data helper buttons
         st.markdown("**Need test files to try it out?**")
         col_s1, col_s2 = st.columns(2)
         with col_s1:
@@ -433,7 +433,7 @@ def main():
                 data=sample_excel_bytes,
                 file_name="sample_vendor_data.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
+                width="stretch",
             )
         with col_s2:
             try:
@@ -443,14 +443,13 @@ def main():
                     data=sample_doc_bytes,
                     file_name="sample_contract_template.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    use_container_width=True,
+                    width="stretch",
                 )
             except Exception:
                 pass
 
         st.divider()
 
-        # Quick guide expander
         with st.expander("ℹ️ Template Placeholder Guide", expanded=False):
             st.markdown(
                 """
@@ -460,17 +459,7 @@ def main():
                 - `{{ vendor_id }}`
                 - `{{ effective_date }}`
                 - `{{ contract_value }}`
-                
-                **Conditionals (Jinja2):**
-                ```jinja2
-                {% if notes %}
-                  Notes: {{ notes }}
-                {% else %}
-                  Standard terms apply.
-                {% endif %}
-                ```
-                
-                *Note: Empty Excel cells are safely converted to empty strings instead of "nan".*
+                - `{{ signature_img }}` *(Inserts your uploaded signature image)*
                 """
             )
 
@@ -479,20 +468,17 @@ def main():
     # -------------------------------------------------------------------------
     if not excel_file or not template_file:
         st.info("👈 Please upload both an **Excel file** and a **Word template** in the sidebar to begin.")
-        
-        # Show instructional workflow cards when waiting for files
         st.markdown(
             """
             ### How it works:
-            1. **Upload Vendor Data**: Upload your `.xlsx` or `.xls` spreadsheet containing vendor details.
-            2. **Upload Word Template**: Upload your `.docx` agreement featuring `{{ placeholder }}` tags.
-            3. **Select Vendors**: Choose specific vendors or click **Select All** for batch processing.
-            4. **Generate & Download**: Download a single `.docx`/`.pdf` or an in-memory `.zip` bundle for multiple vendors.
+            1. **Upload Data & Template**: Provide your Excel records and Word contract template.
+            2. **Upload Signature**: Attach your signature image file in the sidebar.
+            3. **Select Vendors**: Choose specific vendors or **Select All** for batch processing.
+            4. **Generate & Download**: Download your customized contracts containing your embedded signature!
             """
         )
         return
 
-    # Read and parse Excel file
     try:
         df = pd.read_excel(excel_file)
     except Exception as e:
@@ -503,10 +489,8 @@ def main():
         st.warning("⚠️ The uploaded Excel file does not contain any rows.")
         return
 
-    # Read template bytes into memory
     try:
         template_bytes = template_file.getvalue()
-        # Verify template readability
         _ = DocxTemplate(io.BytesIO(template_bytes))
     except Exception as e:
         st.error(f"❌ The uploaded Word template is invalid or corrupted: {str(e)}")
@@ -528,29 +512,22 @@ def main():
                 "Vendor ID Column:",
                 options=columns_list,
                 index=columns_list.index(detected_id_col) if detected_id_col in columns_list else 0,
-                help="Column uniquely identifying each vendor (used for option labels and filenames).",
             )
         with col_c2:
             name_col = st.selectbox(
                 "Vendor Name Column:",
                 options=columns_list,
                 index=columns_list.index(detected_name_col) if detected_name_col in columns_list else 0,
-                help="Column containing the business or entity name.",
             )
         with col_c3:
             st.metric("Total Vendors Found", len(df))
 
-        # Collapsible tabular preview with sanitized NaN display
-        st.dataframe(
-            df.fillna(""),
-            use_container_width=True,
-            height=220,
-        )
+        st.dataframe(df.fillna(""), width="stretch", height=220)
 
-        # Available Jinja placeholders summary
         with st.expander("📋 View Available Template Placeholders", expanded=False):
-            st.markdown("You can use any of these variables in your Word `.docx` template:")
+            st.markdown("Use any of these exact tags inside your Word `.docx` template (plus `{{ signature_img }}`):")
             tags_html = "".join([f'<span class="tag-chip">{{{{ {col} }}}}</span>' for col in columns_list])
+            tags_html += '<span class="tag-chip">{{ signature_img }}</span>'
             st.markdown(tags_html, unsafe_allow_html=True)
 
     # -------------------------------------------------------------------------
@@ -558,31 +535,27 @@ def main():
     # -------------------------------------------------------------------------
     st.subheader("🎯 3. Select Vendors for Contract Generation")
 
-    # Build options dictionary mapping index -> formatted label: "[Index/ID] - [Vendor Name]"
     vendor_options: Dict[int, str] = {}
     for idx, row in df.iterrows():
         v_id = str(sanitize_value(row.get(id_col, idx)))
         v_name = str(sanitize_value(row.get(name_col, f"Vendor {idx}")))
-        label = f"[{v_id}] - {v_name}"
-        vendor_options[int(idx)] = label
+        vendor_options[int(idx)] = f"[{v_id}] - {v_name}"
 
     all_indices = list(vendor_options.keys())
 
-    # Filter out any stale indices if a new Excel file was uploaded
     st.session_state.vendor_multiselect = [
         i for i in st.session_state.vendor_multiselect if i in all_indices
     ]
 
-    # Selection controls: Select All / Deselect All
     ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([1, 1, 3])
 
     with ctrl_col1:
-        if st.button("✅ Select All", use_container_width=True):
+        if st.button("✅ Select All", width="stretch"):
             st.session_state.vendor_multiselect = all_indices
             st.rerun()
 
     with ctrl_col2:
-        if st.button("❌ Deselect All", use_container_width=True):
+        if st.button("❌ Deselect All", width="stretch"):
             st.session_state.vendor_multiselect = []
             st.rerun()
 
@@ -593,7 +566,6 @@ def main():
             unsafe_allow_html=True,
         )
 
-    # Multi-select widget
     selected_indices = st.multiselect(
         "Choose vendors to generate contracts for:",
         options=all_indices,
@@ -606,22 +578,19 @@ def main():
         return
 
     # -------------------------------------------------------------------------
-    # Step 4: Generation Logic (docxtpl & docx2pdf)
+    # Step 4: Generation Logic (docxtpl & signature embedding)
     # -------------------------------------------------------------------------
     st.subheader("⚡ 4. Document Generation")
 
     generate_clicked = st.button(
         f"Generate {len(selected_indices)} Contract{'s' if len(selected_indices) > 1 else ''}",
         type="primary",
-        use_container_width=True,
+        width="stretch",
     )
 
     if generate_clicked:
         if output_format in ["PDF (.pdf)", "Both (.docx & .pdf)"] and not DOCX2PDF_AVAILABLE:
-            st.error(
-                "PDF generation is unavailable. Please check that "
-                "LibreOffice is installed on the server."
-            )
+            st.error("❌ PDF generation requires LibreOffice installed on the server.")
             return
 
         progress_bar = st.progress(0)
@@ -638,29 +607,31 @@ def main():
             v_id = str(sanitize_value(row.get(id_col, idx)))
             v_name = str(sanitize_value(row.get(name_col, f"Vendor_{idx}")))
             
-            # Clean filename
             safe_name = re.sub(r"[^\w\-_\. ]", "_", f"{v_id}_{v_name}").strip()
-
             status_text.text(f"Rendering contract ({i+1}/{total_selected}): {v_name}...")
 
             try:
-                # Prepare sanitized context
                 context = sanitize_row_context(row)
-                
-                # Load fresh template copy from memory
                 doc = DocxTemplate(io.BytesIO(template_bytes))
                 
-                # Render Jinja2 tags
+                # Handle signature image insertion if uploaded
+                if signature_file is not None:
+                    sig_bytes = signature_file.getvalue()
+                    sig_stream = io.BytesIO(sig_bytes)
+                    context["signature_img"] = InlineImage(doc, sig_stream, width=Inches(sig_width_inches))
+                else:
+                    context["signature_img"] = "[Signature Placeholder - No Image Provided]"
+
                 doc.render(context)
                 
-                # 1. Generate Word (.docx) if selected
+                # Generate Word (.docx)
                 if output_format in ["Word (.docx)", "Both (.docx & .pdf)"]:
                     docx_filename = f"Contract_{safe_name}.docx"
                     out_stream = io.BytesIO()
                     doc.save(out_stream)
                     generated_files.append((docx_filename, out_stream.getvalue()))
 
-                # 2. Generate PDF (.pdf) if selected
+                # Generate PDF (.pdf)
                 if output_format in ["PDF (.pdf)", "Both (.docx & .pdf)"]:
                     pdf_filename = f"Contract_{safe_name}.pdf"
                     with tempfile.TemporaryDirectory() as tmpdir:
@@ -697,11 +668,10 @@ def main():
         )
 
         # ---------------------------------------------------------------------
-        # Step 5: Output & Downloads (Single file or .zip bundle)
+        # Step 5: Output & Downloads
         # ---------------------------------------------------------------------
         st.subheader("📥 5. Download Contracts")
 
-        # Single file download
         if len(generated_files) == 1:
             fname, fbytes = generated_files[0]
             mime_type = "application/pdf" if fname.endswith(".pdf") else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -712,7 +682,6 @@ def main():
                 mime=mime_type,
                 type="primary",
             )
-        # Multiple files download -> Bundle into ZIP in memory
         else:
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as zip_file:
@@ -731,10 +700,9 @@ def main():
                     file_name=zip_filename,
                     mime="application/zip",
                     type="primary",
-                    use_container_width=True,
+                    width="stretch",
                 )
 
-            # File list breakdown
             with st.expander("📄 Generated Files Manifest", expanded=True):
                 summary_data = [
                     {"File Name": fn, "Size (KB)": round(len(fb) / 1024, 2)}
