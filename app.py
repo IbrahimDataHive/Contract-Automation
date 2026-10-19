@@ -83,6 +83,18 @@ st.markdown(
 # -----------------------------------------------------------------------------
 # Helper Functions
 # -----------------------------------------------------------------------------
+def normalize_key_name(col_name: str) -> str:
+    """
+    Converts any Excel column header into a valid Jinja2 variable name
+    (lowercase, snake_case, alphanumeric + underscores).
+    """
+    normalized = re.sub(r"[^\w]+", "_", str(col_name).strip().lower()).strip("_")
+    # Ensure it doesn't start with a number (invalid in Jinja2)
+    if normalized and normalized[0].isdigit():
+        normalized = f"col_{normalized}"
+    return normalized or "unnamed_col"
+
+
 def sanitize_value(val: Any) -> Any:
     """
     Sanitizes values extracted from Pandas DataFrames.
@@ -101,17 +113,16 @@ def sanitize_value(val: Any) -> Any:
 def sanitize_row_context(row: pd.Series) -> Dict[str, Any]:
     """
     Converts a DataFrame row into a clean dictionary context for Jinja2 / docxtpl.
-    Both original column names and slugified versions (lower, snake_case)
-    are provided so templates can reference {{ vendor_name }} or {{ Vendor Name }}.
+    Both original column names and normalized snake_case versions are provided.
     """
     context: Dict[str, Any] = {}
     for col_name, value in row.items():
         clean_val = sanitize_value(value)
-        # Original column key
-        context[str(col_name)] = clean_val
+        # Original column key (works if already a valid identifier)
+        context[str(col_name).strip()] = clean_val
         
         # Normalized key: lowercase and underscores instead of spaces/special chars
-        normalized_key = re.sub(r"[^\w]+", "_", str(col_name).strip().lower()).strip("_")
+        normalized_key = normalize_key_name(str(col_name))
         if normalized_key and normalized_key not in context:
             context[normalized_key] = clean_val
             
@@ -346,11 +357,9 @@ def main():
         "Automate the batch generation of personalized vendor contracts from an Excel sheet and a Word template with Jinja2 placeholders."
     )
 
-    # Initialize Session State
-    if "selected_indices" not in st.session_state:
-        st.session_state.selected_indices = []
-    if "all_selected" not in st.session_state:
-        st.session_state.all_selected = False
+    # Initialize Session State for multiselect widget
+    if "vendor_multiselect" not in st.session_state:
+        st.session_state.vendor_multiselect = []
 
     # -------------------------------------------------------------------------
     # Sidebar: File Uploads & Configuration
@@ -411,7 +420,7 @@ def main():
         with st.expander("ℹ️ Template Placeholder Guide", expanded=False):
             st.markdown(
                 """
-                In your Word (`.docx`) file, insert variables enclosed in double curly braces:
+                In your Word (`.docx`) file, insert variables enclosed in double curly braces (using underscores instead of spaces):
                 
                 - `{{ vendor_name }}`
                 - `{{ vendor_id }}`
@@ -504,10 +513,12 @@ def main():
             height=220,
         )
 
-        # Available Jinja placeholders summary
+        # Available Jinja placeholders summary (using valid normalized tags)
         with st.expander("📋 View Available Template Placeholders", expanded=False):
-            st.markdown("You can use any of these variables in your Word `.docx` template:")
-            tags_html = "".join([f'<span class="tag-chip">{{{{ {col} }}}}</span>' for col in columns_list])
+            st.markdown("Use any of these exact tags inside your Word `.docx` template:")
+            tags_html = "".join(
+                [f'<span class="tag-chip">{{{{ {normalize_key_name(col)} }}}}</span>' for col in columns_list]
+            )
             st.markdown(tags_html, unsafe_allow_html=True)
 
     # -------------------------------------------------------------------------
@@ -525,34 +536,38 @@ def main():
 
     all_indices = list(vendor_options.keys())
 
+    # Filter out any stale indices if a new smaller Excel file was uploaded
+    st.session_state.vendor_multiselect = [
+        i for i in st.session_state.vendor_multiselect if i in all_indices
+    ]
+
     # Selection controls: Select All / Deselect All
     ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([1, 1, 3])
 
     with ctrl_col1:
         if st.button("✅ Select All", use_container_width=True):
-            st.session_state.selected_indices = all_indices
+            st.session_state.vendor_multiselect = all_indices
+            st.rerun()
 
     with ctrl_col2:
         if st.button("❌ Deselect All", use_container_width=True):
-            st.session_state.selected_indices = []
+            st.session_state.vendor_multiselect = []
+            st.rerun()
 
     with ctrl_col3:
-        current_count = len(st.session_state.selected_indices)
+        current_count = len(st.session_state.vendor_multiselect)
         st.markdown(
             f"<div style='padding-top: 0.4rem;'>Selected: <b>{current_count}</b> of <b>{len(df)}</b> vendors</div>",
             unsafe_allow_html=True,
         )
 
-    # Multi-select widget
+    # Multi-select widget bound directly to vendor_multiselect key
     selected_indices = st.multiselect(
         "Choose vendors to generate contracts for:",
         options=all_indices,
-        default=st.session_state.selected_indices,
         format_func=lambda x: vendor_options.get(x, str(x)),
         key="vendor_multiselect",
     )
-    # Keep session state in sync
-    st.session_state.selected_indices = selected_indices
 
     if not selected_indices:
         st.warning("⚠️ Please select at least one vendor to generate contracts.")
@@ -644,13 +659,17 @@ def main():
 
         # ---------------------------------------------------------------------
         # Step 5: Output & Downloads (Single .docx or .zip bundle)
-        # -------------------------------------------------------------------------
+        # ---------------------------------------------------------------------
         st.subheader("📥 5. Download Contracts")
 
         # Single contract download
         if len(generated_files) == 1:
             fname, fbytes = generated_files[0]
-            mime_type = "application/pdf" if fname.endswith(".pdf") else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            mime_type = (
+                "application/pdf"
+                if fname.endswith(".pdf")
+                else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
             st.download_button(
                 label=f"📄 Download {fname}",
                 data=fbytes,
