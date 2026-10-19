@@ -436,10 +436,10 @@ def main():
             help="Upload the Word template with Jinja2 placeholders (e.g. {{ vendor_name }}).",
         )
 
-        st.subheader("⚙️ Output Format")
-        format_options = ["Word (.docx)", "PDF (.pdf)", "Both (.docx & .pdf)"]
+        st.subheader("⚙️ Settings")
+        format_options = ["Word (.docx)", "PDF (.pdf)"]
         output_format = st.radio(
-            "Select Contract Format:",
+            "Select Contract Format:",  
             options=format_options,
             index=0,
             help="Choose Word (.docx), PDF (.pdf), or generate both simultaneously.",
