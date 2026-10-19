@@ -1,4 +1,3 @@
 libreoffice
 fonts-liberation
-dox2pdf
-ms-word
+libreoffice-writer
