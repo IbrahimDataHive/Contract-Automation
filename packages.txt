@@ -1,3 +1,2 @@
-libreoffice
-fonts-liberation
 libreoffice-writer
+fonts-liberation
