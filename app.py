@@ -16,8 +16,9 @@ import pandas as pd
 import streamlit as st
 from docxtpl import DocxTemplate
 
-import shutil
+from pathlib import Path
 import subprocess
+import shutil
  
  
 def convert_to_pdf(docx_path, pdf_path):
