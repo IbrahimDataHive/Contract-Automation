@@ -16,11 +16,56 @@ import pandas as pd
 import streamlit as st
 from docxtpl import DocxTemplate
 
-try:
-    from docx2pdf import convert as convert_to_pdf
-    DOCX2PDF_AVAILABLE = True
-except ImportError:
-    DOCX2PDF_AVAILABLE = False
+import shutil
+import subprocess
+ 
+ 
+def convert_to_pdf(docx_path, pdf_path):
+    if shutil.which("libreoffice") is None:
+        raise RuntimeError(
+            "LibreOffice is not installed. "
+            "Please check packages.txt and restart the app."
+        )
+ 
+    output_dir = os.path.dirname(pdf_path) or "."
+    profile_dir = tempfile.mkdtemp(prefix="lo_profile_")
+ 
+    try:
+        result = subprocess.run(
+            [
+                "libreoffice",
+                f"-env:UserInstallation={profile_dir}",
+                "--headless",
+                "--convert-to",
+                "pdf",
+                "--outdir",
+                output_dir,
+                docx_path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+ 
+        generated_pdf = os.path.join(
+            output_dir,
+            os.path.splitext(os.path.basename(docx_path))[0] + ".pdf",
+        )
+ 
+        if result.returncode != 0 or not os.path.exists(generated_pdf):
+            raise RuntimeError(
+                f"PDF conversion failed: {result.stderr or result.stdout}"
+            )
+ 
+        if os.path.abspath(generated_pdf) != os.path.abspath(pdf_path):
+            os.replace(generated_pdf, pdf_path)
+ 
+    finally:
+        shutil.rmtree(profile_dir, ignore_errors=True)
+ 
+ 
+DOCX2PDF_AVAILABLE = shutil.which("libreoffice") is not None
 
 
 # -----------------------------------------------------------------------------
@@ -572,7 +617,10 @@ def main():
 
     if generate_clicked:
         if output_format in ["PDF (.pdf)", "Both (.docx & .pdf)"] and not DOCX2PDF_AVAILABLE:
-            st.error("❌ PDF generation requires `docx2pdf` (`pip install docx2pdf`) and Microsoft Word installed.")
+            st.error(
+                "PDF generation is unavailable. Please check that "
+                "LibreOffice is installed on the server."
+            )
             return
 
         progress_bar = st.progress(0)
